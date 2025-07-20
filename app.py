@@ -16,29 +16,42 @@ G.add_weighted_edges_from([(row['source'], row['target'], row['weight']) for _, 
 # === Calcular métricas ===
 grado = G.degree()
 pagerank = nx.pagerank(G, weight='weight')
+indegree = G.in_degree(weight='weight')
+betweenness = nx.betweenness_centrality(G, weight='weight')
 
+# === Montos para nodos colaboradora ===
+monto_recibido = df_rel.groupby('target')['weight'].sum().reset_index()
+monto_recibido.columns = ['id', 'monto_recibido']
+df_nodos = df_nodos.merge(monto_recibido, on='id', how='left')
+df_nodos['monto_recibido'] = df_nodos['monto_recibido'].fillna(0)
+
+# === Añadir métricas al DataFrame de nodos ===
 df_nodos['grado'] = df_nodos['id'].map(dict(grado)).fillna(0).astype(int)
 df_nodos['pagerank'] = df_nodos['id'].map(pagerank).fillna(0).round(6)
+df_nodos['indegree'] = df_nodos['id'].map(dict(indegree)).fillna(0).astype(int)
+df_nodos['betweenness'] = df_nodos['id'].map(betweenness).fillna(0).round(6)
 
 # === Construir nodos Cytoscape ===
 nodes = []
 for _, row in df_nodos.iterrows():
-    label = f"{row['id']}\nPR: {row['pagerank']}"
-    classes = row['tipo']
+    size = 40
+    if row['tipo'] == 'Colaboradora':
+        size = max(30, min(100, row['monto_recibido'] / 2))  # ajustable
     nodes.append({
-        'data': {'id': row['id'], 'label': label},
-        'classes': classes,
-        'style': {'width': 40, 'height': 40}
+        'data': {'id': row['id'], 'label': row['id']},
+        'classes': row['tipo'],
+        'style': {'width': size, 'height': size}
     })
 
 edges = [{'data': {'source': row['source'], 'target': row['target'], 'weight': row['weight']}} for _, row in df_rel.iterrows()]
 elements = nodes + edges
 
-# === Tablas resumen ===
-tabla_grado = df_nodos[['id', 'grado']].sort_values(by='grado', ascending=False).head(15)
-tabla_pagerank = df_nodos[['id', 'pagerank']].sort_values(by='pagerank', ascending=False).head(15)
+# === Tablas ===
+tabla_grado = df_nodos[['id', 'grado']].sort_values(by='grado', ascending=False)
+tabla_pagerank = df_nodos[['id', 'pagerank']].sort_values(by='pagerank', ascending=False)
+tabla_multiples = df_nodos[['id', 'indegree', 'betweenness']].sort_values(by='indegree', ascending=False)
 
-# === Estilos del grafo ===
+# === Estilos Cytoscape ===
 stylesheet = [
     {'selector': 'node', 'style': {
         'label': 'data(label)',
@@ -52,9 +65,6 @@ stylesheet = [
     }},
     {'selector': '.Colaboradora', 'style': {
         'background-color': '#ff7f0e'
-    }},
-    {'selector': '.destacada', 'style': {
-        'background-color': '#B10DC9'
     }},
     {'selector': 'edge', 'style': {
         'curve-style': 'bezier',
@@ -96,7 +106,7 @@ app.layout = html.Div([
         dcc.Tab(label='📊 Tablas resumen', children=[
             html.Div([
                 html.Div([
-                    html.H4("Top 15 por Grado"),
+                    html.H4("Grado"),
                     dash_table.DataTable(
                         data=tabla_grado.to_dict('records'),
                         columns=[{'name': i, 'id': i} for i in tabla_grado.columns],
@@ -105,20 +115,29 @@ app.layout = html.Div([
                     )
                 ], style={'marginRight': '40px'}),
                 html.Div([
-                    html.H4("Top 15 por PageRank"),
+                    html.H4("PageRank"),
                     dash_table.DataTable(
                         data=tabla_pagerank.to_dict('records'),
                         columns=[{'name': i, 'id': i} for i in tabla_pagerank.columns],
                         style_table={'width': 'fit-content', 'overflowX': 'auto'},
                         style_cell={'textAlign': 'left', 'padding': '5px'}
                     )
-                ])
+                ]),
+                html.Div([
+                    html.H4("InDegree & Betweenness"),
+                    dash_table.DataTable(
+                        data=tabla_multiples.to_dict('records'),
+                        columns=[{'name': i, 'id': i} for i in tabla_multiples.columns],
+                        style_table={'width': 'fit-content', 'overflowX': 'auto'},
+                        style_cell={'textAlign': 'left', 'padding': '5px'}
+                    )
+                ], style={'marginLeft': '40px'})
             ], style={'display': 'flex', 'padding': '20px'})
         ])
     ])
 ])
 
-# === Callback de filtro y búsqueda ===
+# === Callback ===
 @app.callback(
     Output('red-colaboracion', 'elements'),
     Input('busqueda-nodo', 'value'),
@@ -142,6 +161,5 @@ def actualizar_red(busqueda, tipo):
     nuevos_edges = [e for e in edges if e['data']['source'] in nodos_relacionados and e['data']['target'] in nodos_relacionados]
     return nuevos_nodos + nuevos_edges
 
-# === Ejecutar ===
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000, debug=False)
