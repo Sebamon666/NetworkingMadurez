@@ -1,7 +1,0 @@
-dash
-dash-cytoscape
-dash-table
-pandas
-openpyxl
-networkx
-scipy
