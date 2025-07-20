@@ -110,3 +110,38 @@ app.layout = html.Div([
                         data=tabla_pagerank.to_dict('records'),
                         columns=[{'name': i, 'id': i} for i in tabla_pagerank.columns],
                         style_table={'width': 'fit-content', 'overflowX': 'auto'},
+                        style_cell={'textAlign': 'left', 'padding': '5px'}
+                    )
+                ])
+            ], style={'display': 'flex', 'padding': '20px'})
+        ])
+    ])
+])
+
+# === Callback de filtro y búsqueda ===
+@app.callback(
+    Output('red-colaboracion', 'elements'),
+    Input('busqueda-nodo', 'value'),
+    Input('filtro-tipo', 'value')
+)
+def actualizar_red(busqueda, tipo):
+    busqueda = (busqueda or "").strip().lower()
+    nodos_filtrados = []
+    for nodo in nodes:
+        label = nodo['data']['label'].lower()
+        clases = nodo['classes']
+        if (not busqueda or busqueda in label) and (tipo == 'todos' or clases == tipo):
+            nodos_filtrados.append(nodo['data']['id'])
+
+    nodos_relacionados = set(nodos_filtrados)
+    for edge in edges:
+        if edge['data']['source'] in nodos_filtrados or edge['data']['target'] in nodos_filtrados:
+            nodos_relacionados.update([edge['data']['source'], edge['data']['target']])
+
+    nuevos_nodos = [n for n in nodes if n['data']['id'] in nodos_relacionados]
+    nuevos_edges = [e for e in edges if e['data']['source'] in nodos_relacionados and e['data']['target'] in nodos_relacionados]
+    return nuevos_nodos + nuevos_edges
+
+# === Ejecutar ===
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000, debug=False)
