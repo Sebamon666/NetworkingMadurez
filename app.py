@@ -1,165 +1,95 @@
-import dash
-from dash import html, dcc, Input, Output, dash_table
-import dash_cytoscape as cyto
 import pandas as pd
 import networkx as nx
+import dash
+from dash import html, dcc
+import dash_cytoscape as cyto
+import plotly.graph_objs as go
 
-# === Leer archivo desde GitHub ===
-url = "https://github.com/Sebamon666/NetworkingMadurez/raw/main/proyectos_filtrados.xlsx"
-df_nodos = pd.read_excel(url, sheet_name="nodos")
-df_rel = pd.read_excel(url, sheet_name="relaciones")
+# Cargar dataset
+df = pd.read_excel('proyectos_filtrados.xlsx')
 
-# === Construir grafo con NetworkX ===
+# Crear grafo
 G = nx.DiGraph()
-G.add_weighted_edges_from([(row['source'], row['target'], row['weight']) for _, row in df_rel.iterrows()])
+for _, row in df.iterrows():
+    G.add_edge(row['source'], row['target'], weight=row['weight'])
 
-# === Calcular métricas ===
-grado = G.degree()
+# Calcular métricas para nodos destino
+destinos = set(df['target'])
+peso_acumulado = df.groupby('target')['weight'].sum().to_dict()
+
+grado = dict(G.degree(destinos))
 pagerank = nx.pagerank(G, weight='weight')
-indegree = G.in_degree(weight='weight')
-betweenness = nx.betweenness_centrality(G, weight='weight')
+indegree = dict(G.in_degree(destinos, weight='weight'))
+betweenness = nx.betweenness_centrality(G)
 
-# === Montos para nodos colaboradora ===
-monto_recibido = df_rel.groupby('target')['weight'].sum().reset_index()
-monto_recibido.columns = ['id', 'monto_recibido']
-df_nodos = df_nodos.merge(monto_recibido, on='id', how='left')
-df_nodos['monto_recibido'] = df_nodos['monto_recibido'].fillna(0)
+# Filtrar métricas solo para nodos destino
+def filtrar(diccionario):
+    return {k: v for k, v in diccionario.items() if k in destinos}
 
-# === Añadir métricas al DataFrame de nodos ===
-df_nodos['grado'] = df_nodos['id'].map(dict(grado)).fillna(0).astype(int)
-df_nodos['pagerank'] = df_nodos['id'].map(pagerank).fillna(0).round(6)
-df_nodos['indegree'] = df_nodos['id'].map(dict(indegree)).fillna(0).astype(int)
-df_nodos['betweenness'] = df_nodos['id'].map(betweenness).fillna(0).round(6)
+pagerank = filtrar(pagerank)
+betweenness = filtrar(betweenness)
 
-# === Construir nodos Cytoscape ===
+# Construcción de nodos y aristas para Cytoscape
 nodes = []
-for _, row in df_nodos.iterrows():
-    size = 40
-    if row['tipo'] == 'Colaboradora':
-        size = max(30, min(100, row['monto_recibido'] / 2))  # ajustable
+for node in G.nodes():
+    if node in destinos:
+        size = peso_acumulado.get(node, 1) * 20
+        color = '#0074D9'
+    else:
+        size = 20
+        color = '#ccc'
     nodes.append({
-        'data': {'id': row['id'], 'label': row['id']},
-        'classes': row['tipo'],
-        'style': {'width': size, 'height': size}
+        'data': {'id': node, 'label': node},
+        'classes': 'destino' if node in destinos else 'origen',
+        'style': {'background-color': color, 'width': size, 'height': size}
     })
 
-edges = [{'data': {'source': row['source'], 'target': row['target'], 'weight': row['weight']}} for _, row in df_rel.iterrows()]
-elements = nodes + edges
-
-# === Tablas ===
-tabla_grado = df_nodos[['id', 'grado']].sort_values(by='grado', ascending=False)
-tabla_pagerank = df_nodos[['id', 'pagerank']].sort_values(by='pagerank', ascending=False)
-tabla_multiples = df_nodos[['id', 'indegree', 'betweenness']].sort_values(by='indegree', ascending=False)
-
-# === Estilos Cytoscape ===
-stylesheet = [
-    {'selector': 'node', 'style': {
-        'label': 'data(label)',
-        'color': 'black',
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'font-size': 8
-    }},
-    {'selector': '.Organización', 'style': {
-        'background-color': '#1f77b4'
-    }},
-    {'selector': '.Colaboradora', 'style': {
-        'background-color': '#ff7f0e'
-    }},
-    {'selector': 'edge', 'style': {
-        'curve-style': 'bezier',
-        'target-arrow-shape': 'triangle',
-        'width': 2,
-        'line-color': '#ccc',
-        'target-arrow-color': '#ccc'
-    }}
+edges = [
+    {'data': {'source': u, 'target': v}} for u, v in G.edges()
 ]
 
-# === App Dash ===
+# App Dash
 app = dash.Dash(__name__)
 app.layout = html.Div([
-    dcc.Tabs([
-        dcc.Tab(label='🔗 Grafo de relaciones', children=[
-            html.Div([
-                dcc.Input(id='busqueda-nodo', type='text', placeholder='Buscar nodo...', style={'marginRight': '10px'}),
-                dcc.Dropdown(
-                    id='filtro-tipo',
-                    options=[
-                        {'label': 'Todos', 'value': 'todos'},
-                        {'label': 'Organización', 'value': 'Organización'},
-                        {'label': 'Colaboradora', 'value': 'Colaboradora'}
-                    ],
-                    value='todos',
-                    clearable=False,
-                    style={'width': '200px'}
-                )
-            ], style={'padding': '10px', 'display': 'flex'}),
-
-            cyto.Cytoscape(
-                id='red-colaboracion',
-                elements=elements,
-                layout={'name': 'cose'},
-                style={'width': '100vw', 'height': '90vh'},
-                stylesheet=stylesheet
+    html.H2("Red de Conexiones entre Organizaciones"),
+    cyto.Cytoscape(
+        elements=nodes + edges,
+        layout={'name': 'cose'},
+        style={'width': '100%', 'height': '600px'},
+        stylesheet=[
+            {'selector': 'node', 'style': {'label': 'data(label)'}},
+            {'selector': 'edge', 'style': {'curve-style': 'bezier', 'target-arrow-shape': 'triangle'}}
+        ]
+    ),
+    html.Div([
+        dcc.Graph(
+            figure=go.Figure(
+                data=[go.Bar(x=list(grado.keys()), y=list(grado.values()), marker_color='gray')],
+                layout=dict(title='Grado (número de conexiones)', xaxis_title='Organización', yaxis_title='Grado')
             )
-        ]),
-        dcc.Tab(label='📊 Tablas resumen', children=[
-            html.Div([
-                html.Div([
-                    html.H4("Grado"),
-                    dash_table.DataTable(
-                        data=tabla_grado.to_dict('records'),
-                        columns=[{'name': i, 'id': i} for i in tabla_grado.columns],
-                        style_table={'width': 'fit-content', 'overflowX': 'auto'},
-                        style_cell={'textAlign': 'left', 'padding': '5px'}
-                    )
-                ], style={'marginRight': '40px'}),
-                html.Div([
-                    html.H4("PageRank"),
-                    dash_table.DataTable(
-                        data=tabla_pagerank.to_dict('records'),
-                        columns=[{'name': i, 'id': i} for i in tabla_pagerank.columns],
-                        style_table={'width': 'fit-content', 'overflowX': 'auto'},
-                        style_cell={'textAlign': 'left', 'padding': '5px'}
-                    )
-                ]),
-                html.Div([
-                    html.H4("InDegree & Betweenness"),
-                    dash_table.DataTable(
-                        data=tabla_multiples.to_dict('records'),
-                        columns=[{'name': i, 'id': i} for i in tabla_multiples.columns],
-                        style_table={'width': 'fit-content', 'overflowX': 'auto'},
-                        style_cell={'textAlign': 'left', 'padding': '5px'}
-                    )
-                ], style={'marginLeft': '40px'})
-            ], style={'display': 'flex', 'padding': '20px'})
-        ])
-    ])
+        ),
+        dcc.Graph(
+            figure=go.Figure(
+                data=[go.Bar(x=list(pagerank.keys()), y=list(pagerank.values()), marker_color='gray')],
+                layout=dict(title='PageRank', xaxis_title='Organización', yaxis_title='Valor')
+            )
+        )
+    ], style={'display': 'flex'}),
+    html.Div([
+        dcc.Graph(
+            figure=go.Figure(
+                data=[go.Bar(x=list(indegree.keys()), y=list(indegree.values()), marker_color='gray')],
+                layout=dict(title='InDegree', xaxis_title='Organización', yaxis_title='Entradas')
+            )
+        ),
+        dcc.Graph(
+            figure=go.Figure(
+                data=[go.Bar(x=list(betweenness.keys()), y=list(betweenness.values()), marker_color='gray')],
+                layout=dict(title='Betweenness Centrality', xaxis_title='Organización', yaxis_title='Centralidad')
+            )
+        )
+    ], style={'display': 'flex'})
 ])
 
-# === Callback ===
-@app.callback(
-    Output('red-colaboracion', 'elements'),
-    Input('busqueda-nodo', 'value'),
-    Input('filtro-tipo', 'value')
-)
-def actualizar_red(busqueda, tipo):
-    busqueda = (busqueda or "").strip().lower()
-    nodos_filtrados = []
-    for nodo in nodes:
-        label = nodo['data']['label'].lower()
-        clases = nodo['classes']
-        if (not busqueda or busqueda in label) and (tipo == 'todos' or clases == tipo):
-            nodos_filtrados.append(nodo['data']['id'])
-
-    nodos_relacionados = set(nodos_filtrados)
-    for edge in edges:
-        if edge['data']['source'] in nodos_filtrados or edge['data']['target'] in nodos_filtrados:
-            nodos_relacionados.update([edge['data']['source'], edge['data']['target']])
-
-    nuevos_nodos = [n for n in nodes if n['data']['id'] in nodos_relacionados]
-    nuevos_edges = [e for e in edges if e['data']['source'] in nodos_relacionados and e['data']['target'] in nodos_relacionados]
-    return nuevos_nodos + nuevos_edges
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000, debug=False)
+if __name__ == '__main__':
+    app.run_server(debug=True)
