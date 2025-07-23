@@ -137,7 +137,6 @@ app.layout = html.Div([
     ])
 ])
 
-# === Callback ===
 @app.callback(
     Output('red-colaboracion', 'elements'),
     Input('busqueda-nodo', 'value'),
@@ -145,6 +144,11 @@ app.layout = html.Div([
 )
 def actualizar_red(busqueda, tipo):
     busqueda = (busqueda or "").strip().lower()
+
+    # Si no hay filtro ni búsqueda, mostrar todo
+    if not busqueda and tipo == 'todos':
+        return nodes + edges
+
     nodos_filtrados = []
     for nodo in nodes:
         label = nodo['data']['label'].lower()
