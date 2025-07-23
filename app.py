@@ -144,17 +144,15 @@ app.layout = html.Div([
 )
 def actualizar_red(busqueda, tipo):
     busqueda = (busqueda or "").strip().lower()
-
-    # Si no hay filtro ni búsqueda, mostrar todo
-    if not busqueda and tipo == 'todos':
-        return nodes + edges
-
     nodos_filtrados = []
     for nodo in nodes:
         label = nodo['data']['label'].lower()
         clases = nodo['classes']
         if (not busqueda or busqueda in label) and (tipo == 'todos' or clases == tipo):
             nodos_filtrados.append(nodo['data']['id'])
+
+    if not busqueda and tipo == 'todos':
+        return nodes + edges
 
     nodos_relacionados = set(nodos_filtrados)
     for edge in edges:
