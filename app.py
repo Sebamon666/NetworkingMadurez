@@ -9,6 +9,13 @@ url = "https://github.com/Sebamon666/NetworkingMadurez/raw/main/proyectos_filtra
 df_nodos = pd.read_excel(url, sheet_name="nodos")
 df_rel = pd.read_excel(url, sheet_name="relaciones")
 
+print("✅ Iniciando app...")
+print("🟨 Cargando archivo desde:", url)
+print("📄 Relaciones:", len(df_rel))
+print("📄 Nodos:", len(df_nodos))
+print("🔁 Primeras filas relaciones:\n", df_rel.head())
+print("🔁 Primeras filas nodos:\n", df_nodos.head())
+
 # === Construir grafo con NetworkX ===
 G = nx.DiGraph()
 G.add_weighted_edges_from([(row['source'], row['target'], row['weight']) for _, row in df_rel.iterrows()])
