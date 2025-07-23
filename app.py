@@ -9,13 +9,6 @@ url = "https://github.com/Sebamon666/NetworkingMadurez/raw/main/proyectos_filtra
 df_nodos = pd.read_excel(url, sheet_name="nodos")
 df_rel = pd.read_excel(url, sheet_name="relaciones")
 
-print("✅ Iniciando app...")
-print("🟨 Cargando archivo desde:", url)
-print("📄 Relaciones:", len(df_rel))
-print("📄 Nodos:", len(df_nodos))
-print("🔁 Primeras filas relaciones:\n", df_rel.head())
-print("🔁 Primeras filas nodos:\n", df_nodos.head())
-
 # === Construir grafo con NetworkX ===
 G = nx.DiGraph()
 G.add_weighted_edges_from([(row['source'], row['target'], row['weight']) for _, row in df_rel.iterrows()])
@@ -38,24 +31,20 @@ df_nodos['pagerank'] = df_nodos['id'].map(pagerank).fillna(0).round(6)
 df_nodos['indegree'] = df_nodos['id'].map(dict(indegree)).fillna(0).astype(int)
 df_nodos['betweenness'] = df_nodos['id'].map(betweenness).fillna(0).round(6)
 
-# === Construir nodos Cytoscape con posiciones manuales ===
+# === Construir nodos Cytoscape ===
 nodes = []
-for i, row in df_nodos.iterrows():
+for _, row in df_nodos.iterrows():
     size = 40
     if row['tipo'] == 'Colaboradora':
-        size = max(30, min(100, row['monto_recibido'] / 2))
+        size = max(30, min(100, row['monto_recibido'] / 2))  # ajustable
     nodes.append({
         'data': {'id': row['id'], 'label': row['id']},
         'classes': row['tipo'],
-        'position': {'x': 100 + 10 * i, 'y': 100 + 10 * i},
         'style': {'width': size, 'height': size}
     })
 
 edges = [{'data': {'source': row['source'], 'target': row['target'], 'weight': row['weight']}} for _, row in df_rel.iterrows()]
 elements = nodes + edges
-
-print("✅ Nodos construidos:", len(nodes))
-print("✅ Conexiones construidas:", len(edges))
 
 # === Tablas ===
 tabla_grado = df_nodos[['id', 'grado']].sort_values(by='grado', ascending=False)
@@ -109,7 +98,7 @@ app.layout = html.Div([
             cyto.Cytoscape(
                 id='red-colaboracion',
                 elements=elements,
-                layout={'name': 'preset'},  # Cambio aquí
+                layout={'name': 'cose'},
                 style={'width': '100vw', 'height': '90vh'},
                 stylesheet=stylesheet
             )
@@ -162,9 +151,6 @@ def actualizar_red(busqueda, tipo):
         clases = nodo['classes']
         if (not busqueda or busqueda in label) and (tipo == 'todos' or clases == tipo):
             nodos_filtrados.append(nodo['data']['id'])
-
-    if not busqueda and tipo == 'todos':
-        return nodes + edges
 
     nodos_relacionados = set(nodos_filtrados)
     for edge in edges:
