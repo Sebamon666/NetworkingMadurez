@@ -6,7 +6,7 @@ from dash import html
 import plotly.graph_objects as go
 
 # Cargar datos
-df = pd.read_excel('proyectos_filtrados.xlsx', sheet_name='Networking')
+df = pd.read_excel('proyectos_filtrados.xlsx', sheet_name='relaciones')
 df_largo = df.melt(
     id_vars=["Origen"],
     value_vars=[col for col in df.columns if col.startswith("Destino")],
