@@ -1,105 +1,105 @@
 import dash
+from dash import dcc, html, dash_table
 import dash_cytoscape as cyto
-import dash_html_components as html
-import dash_table
 import pandas as pd
 import networkx as nx
 
-df = pd.read_excel("proyectos_filtrados.xlsx", sheet_name="relaciones")
+df = pd.read_excel("proyectos_filtrados.xlsx", sheet_name="Relaciones")
+nodos_df = pd.read_excel("proyectos_filtrados.xlsx", sheet_name="Nodos")
 
-# Transformar a largo
 df_largo = df.melt(
     id_vars=["Organización origen"],
-    value_vars=["Organización destino 1", "Organización destino 2", "Organización destino 3"],
-    var_name="tipo_destino",
+    value_vars=["Destino.1", "Destino.2", "Destino.3", "Destino.4", "Destino.5"],
+    var_name="tipo",
     value_name="colaborador"
 ).dropna(subset=["colaborador"])
 
-# Crear grafo dirigido
+df_largo["colaborador"] = df_largo["colaborador"].str.strip()
+df_largo["Organización origen"] = df_largo["Organización origen"].str.strip()
+
 G = nx.DiGraph()
 for _, row in df_largo.iterrows():
-    origen = row["Organización origen"]
-    destino = row["colaborador"]
-    if G.has_edge(origen, destino):
-        G[origen][destino]["weight"] += 1
-    else:
-        G.add_edge(origen, destino, weight=1)
+    G.add_edge(row["Organización origen"], row["colaborador"])
 
-# Calcular métricas de centralidad
+for _, row in nodos_df.iterrows():
+    G.add_node(row["Organización"], comunidad=row["Comunidad"])
+
 pagerank = nx.pagerank(G, weight='weight')
-indegree = dict(G.in_degree(weight='weight'))
-betweenness = nx.betweenness_centrality(G, weight='weight')
+indegree = dict(G.in_degree())
+betweenness = nx.betweenness_centrality(G)
 
-# Preparar nodos
-nodos_df = pd.DataFrame.from_dict(pagerank, orient='index', columns=['PageRank'])
-nodos_df["InDegree"] = pd.Series(indegree)
-nodos_df["Betweenness"] = pd.Series(betweenness)
-nodos_df = nodos_df.reset_index().rename(columns={"index": "Organización"})
-nodos_df = nodos_df[~nodos_df["Organización"].isin(df_largo["Organización origen"].unique())]
+df_metrics = pd.DataFrame({
+    "Organización": list(pagerank.keys()),
+    "Grado": indegree.values(),
+    "PageRank": pagerank.values(),
+    "Betweenness": betweenness.values(),
+})
+df_metrics = df_metrics[df_metrics["Organización"].isin(df_largo["colaborador"])].copy()
 
-# Escalar tamaño por PageRank solo para nodos destino
-def escala(valor, min_v, max_v, min_out=20, max_out=70):
-    if max_v - min_v == 0:
-        return (min_out + max_out) / 2
-    return min_out + ((valor - min_v) / (max_v - min_v)) * (max_out - min_out)
+df_metrics = df_metrics.merge(nodos_df, on="Organización", how="left")
 
-pagerank_min, pagerank_max = nodos_df["PageRank"].min(), nodos_df["PageRank"].max()
+community_colors = {
+    'Comunidad A': '#FFB6C1',
+    'Comunidad B': '#ADD8E6',
+    'Comunidad C': '#90EE90',
+    'Comunidad D': '#FFD700',
+    'Comunidad E': '#FFA07A',
+    'Comunidad F': '#D3D3D3',
+}
 
-# Armar nodos con color distinto según si es origen o destino
-nodes = []
+node_styles = []
 for node in G.nodes():
-    is_origen = node in df_largo["Organización origen"].unique()
-    color = "#b0c4de" if is_origen else "#7E57C2"
-    size = 30 if is_origen else escala(pagerank[node], pagerank_min, pagerank_max)
-    nodes.append({
+    if node in df_largo["Organización origen"].values:
+        color = '#B0C4DE'
+        size = 20
+    else:
+        comunidad = nodos_df.loc[nodos_df["Organización"] == node, "Comunidad"].values
+        color = community_colors.get(comunidad[0], "#CCCCCC") if comunidad.size > 0 else "#CCCCCC"
+        size = 10 + 40 * pagerank.get(node, 0)
+    node_styles.append({
         'data': {'id': node, 'label': node},
-        'classes': 'origen' if is_origen else 'destino',
-        'style': {'background-color': color, 'width': size, 'height': size, 'label': node}
+        'classes': 'autor',
+        'style': {'background-color': color, 'width': size, 'height': size}
     })
 
-edges = [
-    {'data': {'source': u, 'target': v, 'weight': d['weight']}}
-    for u, v, d in G.edges(data=True)
+edges = [{'data': {'source': source, 'target': target}} for source, target in G.edges()]
+
+stylesheet = [
+    {'selector': 'node', 'style': {'label': 'data(label)', 'text-wrap': 'wrap', 'text-max-width': 80,
+                                   'font-size': 10, 'text-valign': 'center', 'color': '#000'}},
+    {'selector': 'edge', 'style': {'curve-style': 'bezier', 'target-arrow-shape': 'triangle',
+                                   'line-color': '#ccc', 'target-arrow-color': '#ccc'}},
 ]
 
 app = dash.Dash(__name__)
 
 app.layout = html.Div([
-    cyto.Cytoscape(
-        id='cytoscape',
-        elements=nodes + edges,
-        layout={'name': 'cose'},
-        style={'width': '100%', 'height': '700px'},
-        stylesheet=[
-            {'selector': 'node', 'style': {'label': 'data(label)', 'text-valign': 'center', 'color': 'black'}},
-            {'selector': 'edge', 'style': {'curve-style': 'bezier', 'target-arrow-shape': 'triangle', 'line-color': '#ccc'}}
-        ]
-    ),
-    html.Div([
-        dash_table.DataTable(
-            columns=[
-                {'name': 'Organización', 'id': 'Organización'},
-                {'name': 'InDegree', 'id': 'InDegree'},
-                {'name': 'PageRank', 'id': 'PageRank'},
-                {'name': 'Betweenness', 'id': 'Betweenness'}
-            ],
-            data=nodos_df.sort_values("PageRank", ascending=False).to_dict("records"),
-            style_table={'overflowX': 'auto', 'width': '48%', 'display': 'inline-block'},
-            style_cell={'textAlign': 'left', 'fontFamily': 'Arial', 'fontSize': 12},
-        ),
-        dash_table.DataTable(
-            columns=[
-                {'name': 'Organización', 'id': 'Organización'},
-                {'name': 'InDegree', 'id': 'InDegree'},
-                {'name': 'PageRank', 'id': 'PageRank'},
-                {'name': 'Betweenness', 'id': 'Betweenness'}
-            ],
-            data=nodos_df.sort_values("InDegree", ascending=False).to_dict("records"),
-            style_table={'overflowX': 'auto', 'width': '48%', 'display': 'inline-block', 'marginLeft': '2%'},
-            style_cell={'textAlign': 'left', 'fontFamily': 'Arial', 'fontSize': 12},
-        )
+    dcc.Tabs([
+        dcc.Tab(label='Grafo', children=[
+            cyto.Cytoscape(
+                id='cytoscape',
+                layout={'name': 'cose'},
+                style={'width': '100%', 'height': '900px'},
+                elements=node_styles + edges,
+                stylesheet=stylesheet
+            )
+        ]),
+        dcc.Tab(label='Tablas', children=[
+            html.Div([
+                html.Div([
+                    html.H4("Métricas de Centralidad"),
+                    dash_table.DataTable(
+                        columns=[{"name": i, "id": i} for i in df_metrics.columns],
+                        data=df_metrics.to_dict("records"),
+                        style_table={'overflowX': 'auto'},
+                        style_cell={'textAlign': 'left', 'fontSize': 12},
+                        page_size=20
+                    )
+                ])
+            ])
+        ])
     ])
 ])
 
 if __name__ == '__main__':
-    app.run_server(debug=False, host="0.0.0.0", port=8080)
+    app.run_server(debug=False, host='0.0.0.0', port=8080)
