@@ -53,6 +53,9 @@ for _, row in df_nodos.iterrows():
 edges = [{'data': {'source': row['source'], 'target': row['target'], 'weight': row['weight']}} for _, row in df_rel.iterrows()]
 elements = nodes + edges
 
+print("Nodos totales en Cytoscape:", len(nodes))
+print("Conexiones totales en Cytoscape:", len(edges))
+
 # === Tablas ===
 tabla_grado = df_nodos[['id', 'grado']].sort_values(by='grado', ascending=False)
 tabla_pagerank = df_nodos[['id', 'pagerank']].sort_values(by='pagerank', ascending=False)
