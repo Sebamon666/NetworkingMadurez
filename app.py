@@ -38,23 +38,24 @@ df_nodos['pagerank'] = df_nodos['id'].map(pagerank).fillna(0).round(6)
 df_nodos['indegree'] = df_nodos['id'].map(dict(indegree)).fillna(0).astype(int)
 df_nodos['betweenness'] = df_nodos['id'].map(betweenness).fillna(0).round(6)
 
-# === Construir nodos Cytoscape ===
+# === Construir nodos Cytoscape con posiciones manuales ===
 nodes = []
-for _, row in df_nodos.iterrows():
+for i, row in df_nodos.iterrows():
     size = 40
     if row['tipo'] == 'Colaboradora':
-        size = max(30, min(100, row['monto_recibido'] / 2))  # ajustable
+        size = max(30, min(100, row['monto_recibido'] / 2))
     nodes.append({
         'data': {'id': row['id'], 'label': row['id']},
         'classes': row['tipo'],
+        'position': {'x': 100 + 10 * i, 'y': 100 + 10 * i},
         'style': {'width': size, 'height': size}
     })
 
 edges = [{'data': {'source': row['source'], 'target': row['target'], 'weight': row['weight']}} for _, row in df_rel.iterrows()]
 elements = nodes + edges
 
-print("Nodos totales en Cytoscape:", len(nodes))
-print("Conexiones totales en Cytoscape:", len(edges))
+print("✅ Nodos construidos:", len(nodes))
+print("✅ Conexiones construidas:", len(edges))
 
 # === Tablas ===
 tabla_grado = df_nodos[['id', 'grado']].sort_values(by='grado', ascending=False)
@@ -108,7 +109,7 @@ app.layout = html.Div([
             cyto.Cytoscape(
                 id='red-colaboracion',
                 elements=elements,
-                layout={'name': 'cose'},
+                layout={'name': 'preset'},  # Cambio aquí
                 style={'width': '100vw', 'height': '90vh'},
                 stylesheet=stylesheet
             )
@@ -147,6 +148,7 @@ app.layout = html.Div([
     ])
 ])
 
+# === Callback ===
 @app.callback(
     Output('red-colaboracion', 'elements'),
     Input('busqueda-nodo', 'value'),
