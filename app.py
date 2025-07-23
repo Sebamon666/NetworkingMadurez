@@ -1,95 +1,102 @@
 import pandas as pd
 import networkx as nx
 import dash
-from dash import html, dcc
 import dash_cytoscape as cyto
-import plotly.graph_objs as go
+from dash import html
+import plotly.graph_objects as go
 
-# Cargar dataset
-df = pd.read_excel('proyectos_filtrados.xlsx')
+# Cargar datos
+df = pd.read_excel('proyectos_filtrados.xlsx', sheet_name='Networking')
+df_largo = df.melt(
+    id_vars=["Origen"],
+    value_vars=[col for col in df.columns if col.startswith("Destino")],
+    var_name="posicion",
+    value_name="colaborador"
+).dropna(subset=["colaborador"])
+
+df_largo = df_largo.rename(columns={"Origen": "source", "colaborador": "target"})
+df_largo["weight"] = 1
 
 # Crear grafo
 G = nx.DiGraph()
-for _, row in df.iterrows():
-    G.add_edge(row['source'], row['target'], weight=row['weight'])
+for _, row in df_largo.iterrows():
+    G.add_edge(row["source"], row["target"], weight=row["weight"])
 
-# Calcular métricas para nodos destino
-destinos = set(df['target'])
-peso_acumulado = df.groupby('target')['weight'].sum().to_dict()
+# Identificar nodos
+nodos_origen = set(df_largo["source"])
+nodos_destino = set(df_largo["target"])
+solo_destinos = nodos_destino - nodos_origen
 
-grado = dict(G.degree(destinos))
-pagerank = nx.pagerank(G, weight='weight')
-indegree = dict(G.in_degree(destinos, weight='weight'))
+# Calcular métricas solo para nodos destino
+in_degree = dict(G.in_degree(weight="weight"))
+pagerank = nx.pagerank(G, weight="weight")
 betweenness = nx.betweenness_centrality(G)
+metricas_df = pd.DataFrame({
+    "Organización": list(solo_destinos),
+    "Grado": [in_degree.get(n, 0) for n in solo_destinos],
+    "PageRank": [pagerank.get(n, 0) for n in solo_destinos],
+    "Betweenness": [betweenness.get(n, 0) for n in solo_destinos]
+}).sort_values("PageRank", ascending=False)
 
-# Filtrar métricas solo para nodos destino
-def filtrar(diccionario):
-    return {k: v for k, v in diccionario.items() if k in destinos}
-
-pagerank = filtrar(pagerank)
-betweenness = filtrar(betweenness)
-
-# Construcción de nodos y aristas para Cytoscape
-nodes = []
-for node in G.nodes():
-    if node in destinos:
-        size = peso_acumulado.get(node, 1) * 20
-        color = '#0074D9'
+# Estilos visuales
+elementos = []
+for node in G.nodes:
+    entradas = in_degree.get(node, 0)
+    if node in nodos_origen and node not in nodos_destino:
+        size = 25
+        color = "#66B2FF"
     else:
-        size = 20
-        color = '#ccc'
-    nodes.append({
-        'data': {'id': node, 'label': node},
-        'classes': 'destino' if node in destinos else 'origen',
-        'style': {'background-color': color, 'width': size, 'height': size}
+        size = 25 + entradas * 10
+        color = "#FF7F0E"
+    elementos.append({
+        "data": {"id": node, "label": node},
+        "classes": "node",
+        "style": {
+            "width": size,
+            "height": size,
+            "background-color": color,
+            "label": node,
+            "font-size": 10,
+            "text-valign": "center",
+            "color": "white"
+        }
     })
 
-edges = [
-    {'data': {'source': u, 'target': v}} for u, v in G.edges()
-]
+for edge in G.edges(data=True):
+    elementos.append({
+        "data": {"source": edge[0], "target": edge[1]},
+        "classes": "edge"
+    })
 
 # App Dash
 app = dash.Dash(__name__)
 app.layout = html.Div([
-    html.H2("Red de Conexiones entre Organizaciones"),
     cyto.Cytoscape(
-        elements=nodes + edges,
+        id='grafo',
         layout={'name': 'cose'},
-        style={'width': '100%', 'height': '600px'},
+        style={'width': '100%', 'height': '700px'},
+        elements=elementos,
         stylesheet=[
-            {'selector': 'node', 'style': {'label': 'data(label)'}},
-            {'selector': 'edge', 'style': {'curve-style': 'bezier', 'target-arrow-shape': 'triangle'}}
+            {'selector': 'edge', 'style': {'curve-style': 'bezier', 'target-arrow-shape': 'triangle', 'line-color': '#ccc', 'target-arrow-color': '#ccc'}},
         ]
     ),
     html.Div([
-        dcc.Graph(
-            figure=go.Figure(
-                data=[go.Bar(x=list(grado.keys()), y=list(grado.values()), marker_color='gray')],
-                layout=dict(title='Grado (número de conexiones)', xaxis_title='Organización', yaxis_title='Grado')
+        html.Div([
+            html.H4("Grado de Entrada"),
+            html.Table([
+                html.Tr([html.Th("Organización"), html.Th("Grado")])] +
+                [html.Tr([html.Td(row["Organización"]), html.Td(int(row["Grado"]))]) for _, row in metricas_df.iterrows()]
             )
-        ),
-        dcc.Graph(
-            figure=go.Figure(
-                data=[go.Bar(x=list(pagerank.keys()), y=list(pagerank.values()), marker_color='gray')],
-                layout=dict(title='PageRank', xaxis_title='Organización', yaxis_title='Valor')
+        ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+        html.Div([
+            html.H4("PageRank"),
+            html.Table([
+                html.Tr([html.Th("Organización"), html.Th("PageRank")])] +
+                [html.Tr([html.Td(row["Organización"]), html.Td(round(row["PageRank"], 4))]) for _, row in metricas_df.iterrows()]
             )
-        )
-    ], style={'display': 'flex'}),
-    html.Div([
-        dcc.Graph(
-            figure=go.Figure(
-                data=[go.Bar(x=list(indegree.keys()), y=list(indegree.values()), marker_color='gray')],
-                layout=dict(title='InDegree', xaxis_title='Organización', yaxis_title='Entradas')
-            )
-        ),
-        dcc.Graph(
-            figure=go.Figure(
-                data=[go.Bar(x=list(betweenness.keys()), y=list(betweenness.values()), marker_color='gray')],
-                layout=dict(title='Betweenness Centrality', xaxis_title='Organización', yaxis_title='Centralidad')
-            )
-        )
-    ], style={'display': 'flex'})
+        ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+    ])
 ])
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=True, host='0.0.0.0')
