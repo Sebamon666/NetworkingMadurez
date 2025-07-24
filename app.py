@@ -4,7 +4,7 @@ import dash_cytoscape as cyto
 import pandas as pd
 import networkx as nx
 
-# === Leer archivo desde GitHub (formato RAW) ===
+# === Leer archivo desde GitHub ===
 url = "https://github.com/Sebamon666/NetworkingMadurez/raw/main/proyectos_filtrados.xlsx"
 df_nodos = pd.read_excel(url, sheet_name="nodos")
 df_rel = pd.read_excel(url, sheet_name="relaciones")
@@ -16,31 +16,64 @@ G.add_weighted_edges_from([(row['source'], row['target'], row['weight']) for _, 
 # === Calcular métricas ===
 grado = G.degree()
 pagerank = nx.pagerank(G, weight='weight')
+indegree = G.in_degree(weight='weight')
+betweenness = nx.betweenness_centrality(G, weight='weight')
 
+# === Montos para nodos colaboradora ===
+monto_recibido = df_rel.groupby('target')['weight'].sum().reset_index()
+monto_recibido.columns = ['id', 'monto_recibido']
+df_nodos = df_nodos.merge(monto_recibido, on='id', how='left')
+df_nodos['monto_recibido'] = df_nodos['monto_recibido'].fillna(0)
+
+# === Añadir métricas al DataFrame de nodos ===
 df_nodos['grado'] = df_nodos['id'].map(dict(grado)).fillna(0).astype(int)
 df_nodos['pagerank'] = df_nodos['id'].map(pagerank).fillna(0).round(6)
+df_nodos['indegree'] = df_nodos['id'].map(dict(indegree)).fillna(0).astype(int)
+df_nodos['betweenness'] = df_nodos['id'].map(betweenness).fillna(0).round(6)
 
 # === Construir nodos Cytoscape ===
-color_map = {
-    "Organización": "#1f77b4",
-    "Colaboradora": "#ff7f0e"
-}
-
 nodes = []
 for _, row in df_nodos.iterrows():
-    label = f"{row['id']}\nPR: {row['pagerank']}"
+    size = 40
+    if row['tipo'] == 'Colaboradora':
+        size = max(30, min(100, row['monto_recibido'] / 2))  # ajustable
     nodes.append({
-        'data': {'id': row['id'], 'label': label},
+        'data': {'id': row['id'], 'label': row['id']},
         'classes': row['tipo'],
-        'style': {'width': 40, 'height': 40}
+        'style': {'width': size, 'height': size}
     })
 
 edges = [{'data': {'source': row['source'], 'target': row['target'], 'weight': row['weight']}} for _, row in df_rel.iterrows()]
 elements = nodes + edges
 
-# === Tablas resumen ===
-tabla_grado = df_nodos[['id', 'grado']].sort_values(by='grado', ascending=False).head(15)
-tabla_pagerank = df_nodos[['id', 'pagerank']].sort_values(by='pagerank', ascending=False).head(15)
+# === Tablas ===
+tabla_grado = df_nodos[['id', 'grado']].sort_values(by='grado', ascending=False)
+tabla_pagerank = df_nodos[['id', 'pagerank']].sort_values(by='pagerank', ascending=False)
+tabla_multiples = df_nodos[['id', 'indegree', 'betweenness']].sort_values(by='indegree', ascending=False)
+
+# === Estilos Cytoscape ===
+stylesheet = [
+    {'selector': 'node', 'style': {
+        'label': 'data(label)',
+        'color': 'black',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'font-size': 8
+    }},
+    {'selector': '.Organización', 'style': {
+        'background-color': '#1f77b4'
+    }},
+    {'selector': '.Colaboradora', 'style': {
+        'background-color': '#ff7f0e'
+    }},
+    {'selector': 'edge', 'style': {
+        'curve-style': 'bezier',
+        'target-arrow-shape': 'triangle',
+        'width': 2,
+        'line-color': '#ccc',
+        'target-arrow-color': '#ccc'
+    }}
+]
 
 # === App Dash ===
 app = dash.Dash(__name__)
@@ -67,18 +100,13 @@ app.layout = html.Div([
                 elements=elements,
                 layout={'name': 'cose'},
                 style={'width': '100vw', 'height': '90vh'},
-                stylesheet=[
-                    {'selector': 'node', 'style': {'label': 'data(label)', 'color': 'black', 'text-valign': 'center', 'text-halign': 'center', 'font-size': 8}},
-                    {'selector': '.Organización', 'style': {'background-color': '#1f77b4'}},
-                    {'selector': '.Colaboradora', 'style': {'background-color': '#ff7f0e'}},
-                    {'selector': 'edge', 'style': {'curve-style': 'bezier', 'target-arrow-shape': 'triangle', 'line-color': '#ccc', 'target-arrow-color': '#ccc'}}
-                ]
+                stylesheet=stylesheet
             )
         ]),
         dcc.Tab(label='📊 Tablas resumen', children=[
             html.Div([
                 html.Div([
-                    html.H4("Top 15 por Grado"),
+                    html.H4("Grado"),
                     dash_table.DataTable(
                         data=tabla_grado.to_dict('records'),
                         columns=[{'name': i, 'id': i} for i in tabla_grado.columns],
@@ -87,19 +115,29 @@ app.layout = html.Div([
                     )
                 ], style={'marginRight': '40px'}),
                 html.Div([
-                    html.H4("Top 15 por PageRank"),
+                    html.H4("PageRank"),
                     dash_table.DataTable(
                         data=tabla_pagerank.to_dict('records'),
                         columns=[{'name': i, 'id': i} for i in tabla_pagerank.columns],
                         style_table={'width': 'fit-content', 'overflowX': 'auto'},
                         style_cell={'textAlign': 'left', 'padding': '5px'}
                     )
-                ])
+                ]),
+                html.Div([
+                    html.H4("InDegree & Betweenness"),
+                    dash_table.DataTable(
+                        data=tabla_multiples.to_dict('records'),
+                        columns=[{'name': i, 'id': i} for i in tabla_multiples.columns],
+                        style_table={'width': 'fit-content', 'overflowX': 'auto'},
+                        style_cell={'textAlign': 'left', 'padding': '5px'}
+                    )
+                ], style={'marginLeft': '40px'})
             ], style={'display': 'flex', 'padding': '20px'})
         ])
     ])
 ])
 
+# === Callback ===
 @app.callback(
     Output('red-colaboracion', 'elements'),
     Input('busqueda-nodo', 'value'),
