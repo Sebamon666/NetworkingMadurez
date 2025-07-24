@@ -159,6 +159,10 @@ def actualizar_red(busqueda, tipo):
 
     nuevos_nodos = [n for n in nodes if n['data']['id'] in nodos_relacionados]
     nuevos_edges = [e for e in edges if e['data']['source'] in nodos_relacionados and e['data']['target'] in nodos_relacionados]
+
+    if not nodos_relacionados:
+        return nodes + edges  # ← muestra todo por defecto
+
     return nuevos_nodos + nuevos_edges
 
 if __name__ == "__main__":
